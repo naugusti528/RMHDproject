@@ -1,10 +1,12 @@
 //file for physics of brio wu shock tube
 
-//what we're going to do here is use an HLL solver for this:
+//what we're going to do here is use an HLLE solver for this:
 //instead of calculating every single wave speed,
 //we're just going to use 1 wave going left, and another going right
 
 #include <cmath>
+#include <iostream>
+
 
 struct Vector3D{
     double vector[3];
@@ -70,12 +72,39 @@ class Brio_Wu_Physics{
           //the fast magnetosonic waves are 2 of them, and are for the most necessary details
           //the other 5 waves will be used in more advanced simulations, as you'll (hopefully) see
 
+        void get_fast_wavespeeds(double Pressure, double rho_density,
+                          const Vector3D& B_field, const Vector3D& velocity,
+                          double& lambda_plus, double& lambda_minus){
+            double cs2 = get_relativistic_sound_squared(Pressure, rho_density);
+            double va2 = get_alfven_speed_squared(Pressure, rho_density, B_field, velocity);
+            double a2  = get_magnetosonic_speed_squared(Pressure, rho_density, B_field, velocity); // reuse your existing function directly
+
+            double v2 = velocity.norm_squared();
+            double vx = velocity.vector[0];
+
+            double denom     = 1.0 - v2*a2;
+            double bracket   = (1.0 - v2*a2) - (1.0 - a2)*vx*vx;
+            double sqrt_term = std::sqrt(a2*(1.0 - v2)*bracket);
+
+        lambda_plus  = ((1.0 - a2)*vx + sqrt_term) / denom;
+        lambda_minus = ((1.0 - a2)*vx - sqrt_term) / denom;
+        }       //lambda_plus = right-going fast wave in lab frame, lambda_minus = left-going
         
 
         
 };
 
-//first, let's approximate the speeds of these 2 (left&right) waves
+int main(){
+    Brio_Wu_Physics physics;
+    Vector3D zero_v{{0,0,0}};
+    Vector3D zero_B{{0,0,0}};
+    double lp, lm;
+    physics.get_fast_wavespeeds(0.05, 1.0, zero_B, zero_v, lp, lm);
+    double cs_expected = std::sqrt(physics.get_relativistic_sound_squared(0.05, 1.0));
+    std::cout << "lambda_plus = " << lp << " (expect " << cs_expected << ")\n";
+    std::cout << "lambda_minus = " << lm << " (expect " << -cs_expected << ")\n";
+    return 0;
+}
 
 
 // possible research paper directions:
