@@ -1,2 +1,8 @@
-## This is a project detailing my progress of simulations of relativistic magnetohydrodynamics (RMHD).
-## As you'll see, I first start with a simple 1D solver, implementing the Brio-Wu shock tube.
+# This is a series of projects detailing my progress of simulations of general relativistic magnetohydrodynamics (GRMHD).
+
+## Project no.1: The Brio Wu shock tube
+
+### Non technical explanation:
+Physics, regardless of the specialized field, starts with using your imagination. Imagine two sealed rooms connected by a doorway, each filled with air at a different pressure and temperature, and a thin wall separating them. Let's say that wall suddenly vanishes; you'd think those two rooms (now one big room) would calmly balance out, but it actually violently reorganizes itself into a shock wave compressing air into the low-pressure room and a rarefaction wave spreading into the high-pressure one. This is the classic "shock tube" experiment, and it's exactly the setup (mathematically) that the Brio-Wu test uses. In this case, instead of air, the fluid is plasma, which is matter so hot that electrons strip away from their nuclei, leaving a charged soup that's got pressure, temperature, and electromagnetic properties. While we don't regularly deal with plasma, it's the dominant state of matter in stars, accretion disks, and astrophysical jets.
+
+The Brio Wu shock tube is a standard benchmark for testing whether a relativistic MHD code reproduces this known wave structure correctly. I'm running this in special relativistic MHD (SRMHD - no gravity, just regular stuff moving really fast) as a step toward the general relativistic case, where I'll deal with plasma under severe gravity. My focus is on where the numerics of the solver break down: the math equations that tell us what's related will always be the same, but the algorithm that recovers physical quantities (density, pressure, velocity) can fail to converge, or return unphysical results, in extreme environments.
