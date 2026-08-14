@@ -25,6 +25,12 @@ struct GridCell{
     // energy per unit mass   specific enthalpy
 };
 
+struct Conserved{
+    double D, tau;
+    Vector3D S;
+    Vector3D B;
+};
+
 class Brio_Wu_Physics{
     public:
         const double gamma = 2.0; //adiabatic index, indicates speed of sound & thermal compression temperature
@@ -86,10 +92,58 @@ class Brio_Wu_Physics{
             double bracket   = (1.0 - v2*a2) - (1.0 - a2)*vx*vx;
             double sqrt_term = std::sqrt(a2*(1.0 - v2)*bracket);
 
-        lambda_plus  = ((1.0 - a2)*vx + sqrt_term) / denom;
-        lambda_minus = ((1.0 - a2)*vx - sqrt_term) / denom;
+            lambda_plus  = ((1.0 - a2)*vx + sqrt_term) / denom;
+            lambda_minus = ((1.0 - a2)*vx - sqrt_term) / denom;
         }       //lambda_plus = right-going fast wave in lab frame, lambda_minus = left-going
         
+        bool cons2prim(const Conserved& U, GridCell& out, int& iterations, double tol = 1e-10, int max_iter = 50){
+            double S2 = U.S.norm_squared();
+            double B2 = U.B.norm_squared();
+            double SdotB = U.S.dot_product(U.B);
+
+            double W = U.tau + U.D; // crude initial guess
+
+            auto residual = [&](double Wt, double& P_out, double& v2_out)->double{
+                double v2 = (S2*Wt*Wt + SdotB*SdotB*(2.0*Wt + B2)) / (Wt*Wt*(Wt+B2)*(Wt+B2));
+                if(v2 >= 1.0) v2 = 1.0 - 1e-12;
+                double Lorentz = 1.0/std::sqrt(1.0-v2);
+                double rho = U.D/Lorentz;
+                double h = Wt/(rho*Lorentz*Lorentz);
+                double P = rho*(h-1.0)*(gamma-1.0)/gamma;
+                double b2 = B2*(1.0-v2) + SdotB*SdotB/(Wt*Wt);
+                P_out = P; v2_out = v2;
+                return Wt + B2 - P - 0.5*b2 - U.D - U.tau;
+            };
+
+            double P_dummy, v2_dummy, delta = 1e-6;
+            int iter = 0;
+            for(; iter < max_iter; iter++){
+                double f = residual(W, P_dummy, v2_dummy);
+                double f_hi = residual(W+delta, P_dummy, v2_dummy);
+                double f_lo = residual(W-delta, P_dummy, v2_dummy);
+                double dfdW = (f_hi - f_lo)/(2.0*delta);
+                if(std::abs(dfdW) < 1e-14) break;
+                double W_new = W - f/dfdW;
+                if(W_new <= B2) W_new = B2 + 1e-10; // physical guard: W must exceed B^2
+                if(std::abs(W_new - W) < tol){ W = W_new; iter++; break; }
+                W = W_new;
+            }
+            iterations = iter;
+
+            double P_final, v2_final;
+            double f_final = residual(W, P_final, v2_final);
+            if(std::abs(f_final) > 1e-6 || P_final <= 0.0 || v2_final >= 1.0) return false;
+
+            double Lorentz = 1.0/std::sqrt(1.0-v2_final);
+            out.rho = U.D/Lorentz;
+            out.P = P_final;
+            out.B = U.B;
+            for(int i=0;i<3;i++)
+                out.v.vector[i] = (U.S.vector[i] + (SdotB/W)*U.B.vector[i]) / (W+B2);
+            out.epsilon = get_epsilon(out.P, out.rho);
+            out.h = get_h(out.epsilon, out.P, out.rho);
+            return true;
+        }
 
         
 };
