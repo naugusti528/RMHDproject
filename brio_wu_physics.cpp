@@ -99,10 +99,20 @@ int main(){
     Vector3D zero_v{{0,0,0}};
     Vector3D zero_B{{0,0,0}};
     double lp, lm;
+
+    // test 1: no velocity and no magnetic field -- result should be just sound speed
     physics.get_fast_wavespeeds(0.05, 1.0, zero_B, zero_v, lp, lm);
     double cs_expected = std::sqrt(physics.get_relativistic_sound_squared(0.05, 1.0));
+    std::cout << "Test 1 (no velocity, no field):\n";
     std::cout << "lambda_plus = " << lp << " (expect " << cs_expected << ")\n";
     std::cout << "lambda_minus = " << lm << " (expect " << -cs_expected << ")\n";
+
+    // test 2: no velocity, some field -- result should be symmetric and magnitude should be greater than cs
+    Vector3D left_B{{0.75, 1.0, 0.0}};
+    physics.get_fast_wavespeeds(0.05, 1.0, left_B, zero_v, lp, lm);
+    std::cout << "Test 2 (with field):\n";
+    std::cout << "lambda_plus = " << lp << "\n";
+    std::cout << "lambda_minus = " << lm << "\n";
     return 0;
 }
 
