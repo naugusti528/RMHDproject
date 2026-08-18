@@ -95,6 +95,25 @@ class Brio_Wu_Physics{
             lambda_plus  = ((1.0 - a2)*vx + sqrt_term) / denom;
             lambda_minus = ((1.0 - a2)*vx - sqrt_term) / denom;
         }       //lambda_plus = right-going fast wave in lab frame, lambda_minus = left-going
+
+        Conserved prim2cons(const GridCell& prim){
+            double v2 = prim.v.norm_squared();
+            double Lorentz = 1.0/std::sqrt(1.0-v2);
+            double eps = get_epsilon(prim.P, prim.rho);
+            double h = get_h(eps, prim.P, prim.rho);
+            double W = prim.rho*h*Lorentz*Lorentz;
+            double B2 = prim.B.norm_squared();
+            double vdotB = prim.v.dot_product(prim.B);
+            double b2 = get_restframe_magnetic_field_squared(prim.B, prim.v);
+
+            Conserved U;
+            U.D = prim.rho*Lorentz;
+            for(int i=0;i<3;i++)
+                U.S.vector[i] = (W+B2)*prim.v.vector[i] - vdotB*prim.B.vector[i];
+            U.tau = W + B2 - prim.P - 0.5*b2 - U.D;
+            U.B = prim.B;
+            return U;
+        }
         
         bool cons2prim(const Conserved& U, GridCell& out, int& iterations, double tol = 1e-10, int max_iter = 50){
             double S2 = U.S.norm_squared();
@@ -124,7 +143,7 @@ class Brio_Wu_Physics{
                 double dfdW = (f_hi - f_lo)/(2.0*delta);
                 if(std::abs(dfdW) < 1e-14) break;
                 double W_new = W - f/dfdW;
-                if(W_new <= B2) W_new = B2 + 1e-10; // physical guard: W must exceed B^2
+                if(W_new <= 0) W_new = 0.5*W; // physical guard: W must be positive
                 if(std::abs(W_new - W) < tol){ W = W_new; iter++; break; }
                 W = W_new;
             }
@@ -145,6 +164,63 @@ class Brio_Wu_Physics{
             return true;
         }
 
+        // this tells us the fluxes of everything, from mass and energy to momentum and magnetic field
+        Conserved physical_flux(const GridCell& state){
+            double v2 = state.v.norm_squared();
+            double Lorentz = 1.0/std::sqrt(1.0-v2);
+            double vdotB = state.v.dot_product(state.B);
+            double b0 = Lorentz*vdotB;
+
+            Vector3D b; // comoving field, lab-frame spatial components
+            for(int i=0;i<3;i++)
+                b.vector[i] = state.B.vector[i]/Lorentz + b0*state.v.vector[i];
+
+            double b2 = get_restframe_magnetic_field_squared(state.B, state.v);
+            double p_tot = state.P + 0.5*b2;
+
+            Conserved U = prim2cons(state); // reuse — gives D, S, tau, B
+            double vx = state.v.vector[0];
+            double Bx = state.B.vector[0];
+
+            Conserved F;
+            F.D = U.D * vx;
+            for(int i=0;i<3;i++)
+                F.S.vector[i] = U.S.vector[i]*vx + (i==0 ? p_tot : 0.0) - b.vector[i]*Bx/Lorentz;
+            F.tau = U.S.vector[0] - U.D*vx;
+            F.B.vector[0] = 0.0;
+            F.B.vector[1] = vx*state.B.vector[1] - state.v.vector[1]*Bx;
+            F.B.vector[2] = vx*state.B.vector[2] - state.v.vector[2]*Bx;
+            return F;
+        }
+
+        // function for computing numerical flux at grid cell level
+        Conserved hlle_flux(const GridCell& left, const GridCell& right){
+            double lp_L, lm_L, lp_R, lm_R;
+            get_fast_wavespeeds(left.P, left.rho, left.B, left.v, lp_L, lm_L);
+            get_fast_wavespeeds(right.P, right.rho, right.B, right.v, lp_R, lm_R);
+
+            double S_L = std::min({lm_L, lm_R, 0.0});
+            double S_R = std::max({lp_L, lp_R, 0.0});
+
+            Conserved U_L = prim2cons(left);
+            Conserved U_R = prim2cons(right);
+            Conserved F_L = physical_flux(left);   // <- need this next, see below
+            Conserved F_R = physical_flux(right);
+
+            if(S_L >= 0.0) return F_L;
+            if(S_R <= 0.0) return F_R;
+
+            Conserved F_hlle;
+            F_hlle.D = (S_R*F_L.D - S_L*F_R.D + S_L*S_R*(U_R.D - U_L.D)) / (S_R - S_L);
+            F_hlle.tau = (S_R*F_L.tau - S_L*F_R.tau + S_L*S_R*(U_R.tau - U_L.tau)) / (S_R - S_L);
+            for(int i=0;i<3;i++)
+                F_hlle.S.vector[i] = (S_R*F_L.S.vector[i] - S_L*F_R.S.vector[i] + S_L*S_R*(U_R.S.vector[i]-U_L.S.vector[i])) / (S_R - S_L);
+            for(int i=0;i<3;i++)
+                F_hlle.B.vector[i] = (S_R*F_L.B.vector[i] - S_L*F_R.B.vector[i] + S_L*S_R*(U_R.B.vector[i]-U_L.B.vector[i])) / (S_R - S_L);
+            return F_hlle;
+        }
+        
+        //next line
         
 };
 
@@ -167,6 +243,50 @@ int main(){
     std::cout << "Test 2 (with field):\n";
     std::cout << "lambda_plus = " << lp << "\n";
     std::cout << "lambda_minus = " << lm << "\n";
+    
+    // test 3: round trip (prim -> consv -> prim) -- result should show that prim var's are preserved
+    GridCell left_state;
+    left_state.rho = 1.0;
+    left_state.P = 0.05;
+    left_state.v = Vector3D{{0,0,0}};
+    left_state.B = Vector3D{{0.75,1.0,0.0}};
+    Conserved U = physics.prim2cons(left_state);
+    GridCell recovered;
+    int iters;
+    bool ok = physics.cons2prim(U, recovered, iters);
+    std::cout << "\nRound-trip test:\n";
+    std::cout << "success = " << ok << ", iterations = " << iters << "\n";
+    std::cout << "rho: " << recovered.rho << " (expect " << left_state.rho << ")\n";
+    std::cout << "P: " << recovered.P << " (expect " << left_state.P << ")\n";
+    std::cout << "vx: " << recovered.v.vector[0] << " (expect " << left_state.v.vector[0] << ")\n";
+
+    // test 4a: flux test with physical flux values -- result should show accurate flux values
+    Conserved F = physics.physical_flux(left_state);
+    std::cout << "\nphysical_flux test:\n";
+    std::cout << "F_D = " << F.D << " (expect 0)\n";
+    std::cout << "F_tau = " << F.tau << " (expect 0)\n";
+    std::cout << "F_Sx = " << F.S.vector[0] << " (expect 0.26875)\n";
+    std::cout << "F_Sy = " << F.S.vector[1] << " (expect -0.75)\n";
+    // test 4b: flux test with hlle flux -- left-left pair should show identical results
+    Conserved F_same = physics.hlle_flux(left_state, left_state);
+    std::cout << "\nhlle_flux (identical states) test:\n";
+    std::cout << "F_D = " << F_same.D << " (expect 0)\n";
+    std::cout << "F_Sx = " << F_same.S.vector[0] << " (expect 0.26875)\n";
+    std::cout << "F_Sy = " << F_same.S.vector[1] << " (expect -0.75)\n";
+    // test 4c: flux test with hlle flux -- actual left-right test
+    GridCell right_state;
+    right_state.rho = 0.125;
+    right_state.P = 0.005;
+    right_state.v = Vector3D{{0,0,0}};
+    right_state.B = Vector3D{{0.75,-1.0,0.0}};
+    Conserved F_riemann = physics.hlle_flux(left_state, right_state);
+    std::cout << "\nhlle_flux (Brio-Wu L/R) test:\n";
+    std::cout << "F_D = " << F_riemann.D << "\n";
+    std::cout << "F_Sx = " << F_riemann.S.vector[0] << "\n";
+    
+
+    //---------------------------------------
+
     return 0;
 }
 
