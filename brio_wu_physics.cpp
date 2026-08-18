@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <fstream>
 
 
 struct Vector3D{
@@ -219,13 +220,9 @@ class Brio_Wu_Physics{
                 F_hlle.B.vector[i] = (S_R*F_L.B.vector[i] - S_L*F_R.B.vector[i] + S_L*S_R*(U_R.B.vector[i]-U_L.B.vector[i])) / (S_R - S_L);
             return F_hlle;
         }
-        
-        //next line
-        
 };
 
-int main(){
-    Brio_Wu_Physics physics;
+void run_unit_tests(Brio_Wu_Physics& physics, GridCell& left_state){
     Vector3D zero_v{{0,0,0}};
     Vector3D zero_B{{0,0,0}};
     double lp, lm;
@@ -245,7 +242,6 @@ int main(){
     std::cout << "lambda_minus = " << lm << "\n";
     
     // test 3: round trip (prim -> consv -> prim) -- result should show that prim var's are preserved
-    GridCell left_state;
     left_state.rho = 1.0;
     left_state.P = 0.05;
     left_state.v = Vector3D{{0,0,0}};
@@ -283,7 +279,88 @@ int main(){
     std::cout << "\nhlle_flux (Brio-Wu L/R) test:\n";
     std::cout << "F_D = " << F_riemann.D << "\n";
     std::cout << "F_Sx = " << F_riemann.S.vector[0] << "\n";
+}
+
+int main(){
     
+    Brio_Wu_Physics physics;
+    GridCell left_state;
+    left_state.rho = 1.0;
+    left_state.P = 0.05;
+    left_state.v = Vector3D{{0,0,0}};
+    left_state.B = Vector3D{{0.75,1.0,0.0}};
+
+    run_unit_tests(physics, left_state);
+
+    int N = 400;              // number of grid cells
+    double x_min = -0.5, x_max = 0.5;
+    double dx = (x_max - x_min) / N;
+    double t = 0.0, t_end = 0.2;   // standard Brio-Wu stopping time
+    double CFL = 0.4;
+
+    std::vector<GridCell> W(N);       // primitives
+    std::vector<Conserved> U(N);      // conserved
+
+    // initialize: left half = left_state, right half = right_state
+    GridCell right_state;
+    right_state.rho = 0.125; right_state.P = 0.005;
+    right_state.v = Vector3D{{0,0,0}}; right_state.B = Vector3D{{0.75,-1.0,0.0}};
+
+    for(int i=0;i<N;i++){
+        double x = x_min + (i+0.5)*dx;
+        W[i] = (x < 0.0) ? left_state : right_state;
+        U[i] = physics.prim2cons(W[i]);
+    }
+
+    int floor_count = 0;
+    while(t < t_end){
+        // 1. find dt from CFL
+        double max_speed = 0.0;
+        for(int i=0;i<N;i++){
+            double lp, lm;
+            physics.get_fast_wavespeeds(W[i].P, W[i].rho, W[i].B, W[i].v, lp, lm);
+            max_speed = std::max({max_speed, std::abs(lp), std::abs(lm)});
+        }
+        double dt = CFL * dx / max_speed;
+        if(t + dt > t_end) dt = t_end - t;
+
+        // 2. compute interface fluxes (N-1 interior interfaces; simple outflow at edges)
+        std::vector<Conserved> F(N+1);
+        for(int i=1;i<N;i++) F[i] = physics.hlle_flux(W[i-1], W[i]);
+        F[0] = physics.physical_flux(W[0]);      // boundary: just use edge cell's own flux
+        F[N] = physics.physical_flux(W[N-1]);
+
+        // 3. update conserved variables
+        std::vector<Conserved> U_new(N);
+        for(int i=0;i<N;i++){
+            U_new[i].D   = U[i].D   - (dt/dx)*(F[i+1].D   - F[i].D);
+            U_new[i].tau = U[i].tau - (dt/dx)*(F[i+1].tau - F[i].tau);
+            for(int k=0;k<3;k++){
+                U_new[i].S.vector[k] = U[i].S.vector[k] - (dt/dx)*(F[i+1].S.vector[k] - F[i].S.vector[k]);
+                U_new[i].B.vector[k] = U[i].B.vector[k] - (dt/dx)*(F[i+1].B.vector[k] - F[i].B.vector[k]);
+            }
+        }
+
+        // 4. recover primitives, track failures
+        for(int i=0;i<N;i++){
+            int iters;
+            bool ok = physics.cons2prim(U_new[i], W[i], iters);
+            if(!ok){ floor_count++; /* handle failure -- see below */ }
+            U[i] = U_new[i];
+        }
+
+        t += dt;
+    }
+
+    std::cout << "Done. Total cons2prim failures: " << floor_count << "\n";
+    
+    std::ofstream outfile("brio_wu_output.csv");
+    outfile << "x,rho,P,vx,By\n";
+    for(int i=0;i<N;i++){
+        double x = x_min + (i+0.5)*dx;
+        outfile << x << "," << W[i].rho << "," << W[i].P << "," << W[i].v.vector[0] << "," << W[i].B.vector[1] << "\n";
+    }
+    outfile.close();
 
     //---------------------------------------
 
