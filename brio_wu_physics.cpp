@@ -29,6 +29,13 @@ struct Conserved{
     Vector3D B;  // magnetic field (spatial vector)                -> magnetic flux conservation
 };
 
+struct SweepResult{
+    double P_left, P_right, By_left, By_right;
+    double beta_left;      // plasma beta of the left state, for reference
+    int floor_count;
+    bool completed;        // false if the run produced NaN/Inf and had to bail early
+};
+
 class Brio_Wu_Physics{
     public:
         const double gamma = 2.0; //adiabatic index, indicates speed of sound & thermal compression temperature
@@ -276,6 +283,69 @@ void run_unit_tests(Brio_Wu_Physics& physics, GridCell& left_state){
     std::cout << "F_Sx = " << F_riemann.S.vector[0] << "\n";
 }
 
+SweepResult run_simulation(double P_left, double P_right, double By_left, double By_right, int N = 400, double CFL = 0.4, double t_end = 0.2){
+    Brio_Wu_Physics physics;
+    double x_min = -0.5, x_max = 0.5;
+    double dx = (x_max - x_min) / N;
+    double t = 0.0;
+
+    GridCell left_state, right_state;
+    left_state.rho = 1.0;   left_state.P = P_left;
+    left_state.v = Vector3D{{0,0,0}};  left_state.B = Vector3D{{0.75, By_left, 0.0}};
+    right_state.rho = 0.125; right_state.P = P_right;
+    right_state.v = Vector3D{{0,0,0}}; right_state.B = Vector3D{{0.75, By_right, 0.0}};
+
+    std::vector<GridCell> W(N);
+    std::vector<Conserved> U(N);
+    for(int i=0;i<N;i++){
+        double x = x_min + (i+0.5)*dx;
+        W[i] = (x < 0.0) ? left_state : right_state;
+        U[i] = physics.prim2cons(W[i]);
+    }
+
+    int floor_count = 0;
+    bool completed = true;
+
+    while(t < t_end){
+        double max_speed = 0.0;
+        for(int i=0;i<N;i++){
+            double lp, lm;
+            physics.get_fast_wavespeeds(W[i].P, W[i].rho, W[i].B, W[i].v, lp, lm);
+            max_speed = std::max({max_speed, std::abs(lp), std::abs(lm)});
+        }
+        if(!(max_speed > 0.0) || std::isnan(max_speed)){ completed = false; break; }
+        double dt = CFL * dx / max_speed;
+        if(t + dt > t_end) dt = t_end - t;
+
+        std::vector<Conserved> F(N+1);
+        for(int i=1;i<N;i++) F[i] = physics.hlle_flux(W[i-1], W[i]);
+        F[0] = physics.physical_flux(W[0]);
+        F[N] = physics.physical_flux(W[N-1]);
+
+        std::vector<Conserved> U_new(N);
+        for(int i=0;i<N;i++){
+            U_new[i].D   = U[i].D   - (dt/dx)*(F[i+1].D   - F[i].D);
+            U_new[i].tau = U[i].tau - (dt/dx)*(F[i+1].tau - F[i].tau);
+            for(int k=0;k<3;k++){
+                U_new[i].S.vector[k] = U[i].S.vector[k] - (dt/dx)*(F[i+1].S.vector[k] - F[i].S.vector[k]);
+                U_new[i].B.vector[k] = U[i].B.vector[k] - (dt/dx)*(F[i+1].B.vector[k] - F[i].B.vector[k]);
+            }
+        }
+
+        for(int i=0;i<N;i++){
+            int iters;
+            bool ok = physics.cons2prim(U_new[i], W[i], iters);
+            if(!ok) floor_count++;
+            U[i] = U_new[i];
+        }
+        t += dt;
+    }
+
+    double beta_left = (2.0*P_left) / (left_state.B.norm_squared());
+
+    return SweepResult{P_left, P_right, By_left, By_right, beta_left, floor_count, completed};
+}
+
 int main(){
     
     Brio_Wu_Physics physics;
@@ -287,77 +357,21 @@ int main(){
 
     run_unit_tests(physics, left_state);
 
-    int N = 400;              // number of grid cells
-    double x_min = -0.5, x_max = 0.5;
-    double dx = (x_max - x_min) / N;
-    double t = 0.0, t_end = 0.2;   // standard Brio-Wu stopping time
-    double CFL = 0.4;
+    std::vector<double> pressure_scales = {1.0, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001};
+    // each scale multiplies the baseline P_left=0.05, P_right=0.005 -- lower scale = lower beta
 
-    std::vector<GridCell> W(N);       // primitives
-    std::vector<Conserved> U(N);      // conserved
+    std::ofstream outfile("beta_sweep_results.csv");
+    outfile << "P_left,P_right,beta_left,floor_count,completed\n";
 
-    // initialize: left half = left_state, right half = right_state
-    GridCell right_state;
-    right_state.rho = 0.125; right_state.P = 0.005;
-    right_state.v = Vector3D{{0,0,0}}; right_state.B = Vector3D{{0.75,-1.0,0.0}};
-
-    for(int i=0;i<N;i++){
-        double x = x_min + (i+0.5)*dx;
-        W[i] = (x < 0.0) ? left_state : right_state;
-        U[i] = physics.prim2cons(W[i]);
+    for(double scale : pressure_scales){
+        SweepResult r = run_simulation(0.05*scale, 0.005*scale, 1.0, -1.0);
+        outfile << r.P_left << "," << r.P_right << "," << r.beta_left << ","
+                << r.floor_count << "," << r.completed << "\n";
+        std::cout << "beta_left=" << r.beta_left << " floor_count=" << r.floor_count
+                   << " completed=" << r.completed << "\n";
     }
 
-    int floor_count = 0;
-    while(t < t_end){
-        // 1. find dt from CFL
-        double max_speed = 0.0;
-        for(int i=0;i<N;i++){
-            double lp, lm;
-            physics.get_fast_wavespeeds(W[i].P, W[i].rho, W[i].B, W[i].v, lp, lm);
-            max_speed = std::max({max_speed, std::abs(lp), std::abs(lm)});
-        }
-        double dt = CFL * dx / max_speed;
-        if(t + dt > t_end) dt = t_end - t;
-
-        // 2. compute interface fluxes (N-1 interior interfaces; simple outflow at edges)
-        std::vector<Conserved> F(N+1);
-        for(int i=1;i<N;i++) F[i] = physics.hlle_flux(W[i-1], W[i]);
-        F[0] = physics.physical_flux(W[0]);      // boundary: just use edge cell's own flux
-        F[N] = physics.physical_flux(W[N-1]);
-
-        // 3. update conserved variables
-        std::vector<Conserved> U_new(N);
-        for(int i=0;i<N;i++){
-            U_new[i].D   = U[i].D   - (dt/dx)*(F[i+1].D   - F[i].D);
-            U_new[i].tau = U[i].tau - (dt/dx)*(F[i+1].tau - F[i].tau);
-            for(int k=0;k<3;k++){
-                U_new[i].S.vector[k] = U[i].S.vector[k] - (dt/dx)*(F[i+1].S.vector[k] - F[i].S.vector[k]);
-                U_new[i].B.vector[k] = U[i].B.vector[k] - (dt/dx)*(F[i+1].B.vector[k] - F[i].B.vector[k]);
-            }
-        }
-
-        // 4. recover primitives, track failures
-        for(int i=0;i<N;i++){
-            int iters;
-            bool ok = physics.cons2prim(U_new[i], W[i], iters);
-            if(!ok){ floor_count++; /* handle failure -- see below */ }
-            U[i] = U_new[i];
-        }
-
-        t += dt;
-    }
-
-    std::cout << "Done. Total cons2prim failures: " << floor_count << "\n";
-    
-    std::ofstream outfile("brio_wu_output.csv");
-    outfile << "x,rho,P,vx,By\n";
-    for(int i=0;i<N;i++){
-        double x = x_min + (i+0.5)*dx;
-        outfile << x << "," << W[i].rho << "," << W[i].P << "," << W[i].v.vector[0] << "," << W[i].B.vector[1] << "\n";
-    }
     outfile.close();
-
-    //---------------------------------------
 
     return 0;
 }
