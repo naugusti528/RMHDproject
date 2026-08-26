@@ -4,6 +4,7 @@
 #include <cmath>
 #include <iostream>
 #include <fstream>
+#include <limits>
 
 struct Vector3D{
     double vector[3];
@@ -31,9 +32,11 @@ struct Conserved{
 
 struct SweepResult{
     double P_left, P_right, By_left, By_right;
-    double beta_left;      // plasma beta of the left state, for reference
+    double beta_left;          // plasma beta of the left state, for reference
     int floor_count;
-    bool completed;        // false if the run produced NaN/Inf and had to bail early
+    bool completed;            // false if the run produced NaN/Inf and had to bail early
+    int max_iterations_seen;   // worst-case NR iteration count across all cells, all timesteps
+    double min_pressure_seen;  // lowest pressure encountered anywhere, ever, in the run
 };
 
 class Brio_Wu_Physics{
@@ -305,6 +308,8 @@ SweepResult run_simulation(double P_left, double P_right, double By_left, double
 
     int floor_count = 0;
     bool completed = true;
+    int max_iterations_seen = 0;
+    double min_pressure_seen = std::numeric_limits<double>::max();
 
     while(t < t_end){
         double max_speed = 0.0;
@@ -336,6 +341,8 @@ SweepResult run_simulation(double P_left, double P_right, double By_left, double
             int iters;
             bool ok = physics.cons2prim(U_new[i], W[i], iters);
             if(!ok) floor_count++;
+            max_iterations_seen = std::max(max_iterations_seen, iters);
+            min_pressure_seen = std::min(min_pressure_seen, W[i].P);
             U[i] = U_new[i];
         }
         t += dt;
@@ -343,7 +350,7 @@ SweepResult run_simulation(double P_left, double P_right, double By_left, double
 
     double beta_left = (2.0*P_left) / (left_state.B.norm_squared());
 
-    return SweepResult{P_left, P_right, By_left, By_right, beta_left, floor_count, completed};
+    return SweepResult{P_left, P_right, By_left, By_right, beta_left, floor_count, completed, max_iterations_seen, min_pressure_seen};
 }
 
 int main(){
@@ -357,18 +364,16 @@ int main(){
 
     run_unit_tests(physics, left_state);
 
-    std::vector<double> pressure_scales = {1.0, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001};
+    std::vector<double> pressure_scales = {1.0, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 0.0005, 0.0002, 0.0001, 0.00005, 0.00002, 0.00001};
     // each scale multiplies the baseline P_left=0.05, P_right=0.005 -- lower scale = lower beta
 
     std::ofstream outfile("beta_sweep_results.csv");
-    outfile << "P_left,P_right,beta_left,floor_count,completed\n";
+    outfile << "P_left,P_right,beta_left,floor_count,completed,max_iterations_seen,min_pressure_seen\n";
 
     for(double scale : pressure_scales){
         SweepResult r = run_simulation(0.05*scale, 0.005*scale, 1.0, -1.0);
-        outfile << r.P_left << "," << r.P_right << "," << r.beta_left << ","
-                << r.floor_count << "," << r.completed << "\n";
-        std::cout << "beta_left=" << r.beta_left << " floor_count=" << r.floor_count
-                   << " completed=" << r.completed << "\n";
+        outfile << r.P_left <<","<< r.P_right <<","<< r.beta_left <<","<< r.floor_count <<","<< r.completed <<","<< r.max_iterations_seen <<","<< r.min_pressure_seen << "\n";
+        std::cout << "beta_left="<<r.beta_left << " floor_count="<<r.floor_count << " completed="<<r.completed << "\n";
     }
 
     outfile.close();
