@@ -367,16 +367,17 @@ int main(){
 
     std::vector<double> pressure_scales = {1.0, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001, 0.0005, 0.0002, 0.0001, 0.00005, 0.00002, 0.00001};
     // each scale multiplies the baseline P_left=0.05, P_right=0.005 -- lower scale = lower beta
-    std::vector<double> velocities = {0.0, 0.3, 0.5, 0.7, 0.9, 0.99};
+    std::vector<double> velocities = {-0.9, -0.5, 0.0, 0.5, 0.9, 0.99};
 
-    std::ofstream outfile("beta_sweep_results.csv");
-    outfile << "P_left,P_right,beta_left,vx_left,floor_count,completed,max_iterations_seen,min_pressure_seen\n";
+    std::ofstream outfile("beta_velocity_asymmetric_sweep_results.csv");
+    outfile << "P_left,P_right,beta_left,vx_left,vx_right,floor_count,completed,max_iterations_seen,min_pressure_seen\n";
 
     for(double scale : pressure_scales){
-        for(double v : velocities){
-            SweepResult r = run_simulation(0.05*scale, 0.005*scale, 1.0, -1.0, v, v);
-            outfile << r.P_left <<","<< r.P_right <<","<< r.beta_left <<","<< r.vx_left <<","<< r.floor_count <<","<< r.completed <<","<< r.max_iterations_seen <<","<< r.min_pressure_seen << "\n";
-        std::cout << "beta="<<r.beta_left << " vx="<<r.vx_left << " floor_count="<<r.floor_count << " completed="<<r.completed << " max_iter="<<r.max_iterations_seen << " min_P="<<r.min_pressure_seen << "\n";
+        for(double vL : velocities){
+            for(double vR : velocities){
+                SweepResult r = run_simulation(0.05*scale, 0.005*scale, 1.0, -1.0, vL, vR);
+                outfile << r.P_left <<","<< r.P_right <<","<< r.beta_left <<","<< r.vx_left <<","<< r.vx_right <<","<< r.floor_count <<","<< r.completed <<","<< r.max_iterations_seen <<","<< r.min_pressure_seen<<"\n";
+            }
         }
     }
     outfile.close();
