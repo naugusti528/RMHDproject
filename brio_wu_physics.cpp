@@ -312,6 +312,9 @@ SweepResult run_simulation(double P_left, double P_right, double By_left, double
     int max_iterations_seen = 0;
     double min_pressure_seen = std::numeric_limits<double>::max();
 
+    // safety check to ensure the program stops when it stalls
+    int step_count = 0; int max_steps = 100000;
+
     while(t < t_end){
         double max_speed = 0.0;
         for(int i=0;i<N;i++){
@@ -347,6 +350,8 @@ SweepResult run_simulation(double P_left, double P_right, double By_left, double
             U[i] = U_new[i];
         }
         t += dt;
+        step_count++;
+        if(step_count > max_steps) {completed=false; break;}
     }
 
     double beta_left = (2.0*P_left) / (left_state.B.norm_squared());
