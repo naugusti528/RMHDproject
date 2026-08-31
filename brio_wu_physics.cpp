@@ -38,6 +38,7 @@ struct SweepResult{
     bool completed;            // false if the run produced NaN/Inf and had to bail early
     int max_iterations_seen;   // worst-case NR iteration count across all cells, all timesteps
     double min_pressure_seen;  // lowest pressure encountered anywhere, ever, in the run
+    int step_count;
 };
 
 class Brio_Wu_Physics{
@@ -356,7 +357,7 @@ SweepResult run_simulation(double P_left, double P_right, double By_left, double
 
     double beta_left = (2.0*P_left) / (left_state.B.norm_squared());
 
-    return SweepResult{P_left, P_right, By_left, By_right, vx_left, vx_right, beta_left, floor_count, completed, max_iterations_seen, min_pressure_seen};
+    return SweepResult{P_left, P_right, By_left, By_right, vx_left, vx_right, beta_left, floor_count, completed, max_iterations_seen, min_pressure_seen, step_count};
 }
 
 int main(){
