@@ -376,13 +376,14 @@ int main(){
     std::vector<double> velocities = {-0.9, -0.5, 0.0, 0.5, 0.9, 0.99};
 
     std::ofstream outfile("beta_velocity_asymmetric_sweep_results.csv");
-    outfile << "P_left,P_right,beta_left,vx_left,vx_right,floor_count,completed,max_iterations_seen,min_pressure_seen\n";
+    outfile << "P_left,P_right,beta_left,vx_left,vx_right,floor_count,completed,max_iterations_seen,min_pressure_seen,step_count\n";
 
     for(double scale : pressure_scales){
         for(double vL : velocities){
             for(double vR : velocities){
                 SweepResult r = run_simulation(0.05*scale, 0.005*scale, 1.0, -1.0, vL, vR);
-                outfile << r.P_left <<","<< r.P_right <<","<< r.beta_left <<","<< r.vx_left <<","<< r.vx_right <<","<< r.floor_count <<","<< r.completed <<","<< r.max_iterations_seen <<","<< r.min_pressure_seen<<"\n";
+                outfile << r.P_left <<","<< r.P_right <<","<< r.beta_left <<","<< r.vx_left <<","<< r.vx_right <<","<< r.floor_count <<","<< r.completed <<","<< r.max_iterations_seen <<","
+                        << r.min_pressure_seen <<","<<  r.step_count<<"\n";
             }
         }
     }
