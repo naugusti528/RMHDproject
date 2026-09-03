@@ -28,7 +28,7 @@ Important to note though: this was when the velocity was 0. Next, I'm going to k
 ### Update - September 3rd 2026
 Plasma beta, across 8 orders of magnitude, has no measurable effect on my solver's stability, both in the at-rest (zero velocity) or boosted (left/right nonzero velocities) regimes.<br>
 The solver doesn't have numerical-accuracy failures, but more so computable intractability driven by the relative velocity between the 2 states, via the CFL condition.<br>
-The breaking condition lies in the difference of the left/right velocities rather than the individual velocities. If both the left and right velocities are the same, that's simply a boosted regime, where the waves move away from us, but relative to them, they are stationary.
+The failure pattern is velocity-driven, not beta-driven, but it isn't fully explained by the difference between the left and right velocities alone: the data in the asymmetric velocity CSV file shows that outcomes depend on which side is moving fast, not just by how much they differ, and I haven't yet pinned down the exact mechanism. That's the next thing to investigate, not a settled result yet.
 
 To summarize: testing asymmetric velocities led to a CFL-driven stall. The solver can handle the physics, but took an infeasible amount of time handling extreme conditions. This is not a failure as much as it is a temporary flaw, but it is a necessary obstacle I must bypass.
 
