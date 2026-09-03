@@ -22,5 +22,13 @@ The Brio Wu test is vulnerable to breaking from certain values of variables. My 
 I finished the solver and under standard conditions it produces the shock, compound, and rarefaction waves properly. My next goal is to fault test it with each variable condition present. To have some structure present in how I'm doing this, I'm going to focus on 2 distinct categories of the quantities I'm fault testing: one consists of the physical parameters (i.e. magnetic field, velocity, pressure, plasma beta, etc) and the other consists of numerical parameters (resolution, CFL, Newton-Raphson tolerance, etc). 
 
 ### Update - August 26th 2026
-I tried to break the solver with increasingly low magnitudes, and nothing happened. I did a sweep where the pressure went across 8 orders of magnitude, and the solver stayed robust and functional.
+I tried to break the solver with increasingly low magnitudes, and nothing happened. I did a sweep where the pressure went across 8 orders of magnitude, and the solver stayed robust and functional.<br>
 Important to note though: this was when the velocity was 0. Next, I'm going to keep the beta sweep while implementing a velocity sweep. Maybe once I approach relativistic velocities, the solver might crash.
+
+### Update - September 3rd 2026
+Plasma beta, across 8 orders of magnitude, has no measurable effect on my solver's stability, both in the at-rest (zero velocity) or boosted (left/right nonzero velocities) regimes.<br>
+The solver doesn't have numerical-accuracy failures, but more so computable intractability driven by the relative velocity between the 2 states, via the CFL condition.<br>
+The breaking condition lies in the difference of the left/right velocities rather than the individual velocities. If both the left and right velocities are the same, that's simply a boosted regime, where the waves move away from us, but relative to them, they are stationary.
+
+To summarize: testing asymmetric velocities led to a CFL-driven stall. The solver can handle the physics, but took an infeasible amount of time handling extreme conditions. This is not a failure as much as it is a temporary flaw, but it is a necessary obstacle I must bypass.
+
